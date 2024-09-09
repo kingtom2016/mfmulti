@@ -1,0 +1,55 @@
+
+
+echo "#SampleID"> sample-id
+echo "fastqFile" > filepath
+echo "SequencingRun" > SequencingRun
+for fastq in $(find *R1.fq.gz); do
+  fastq=${fastq%.R1.fq.gz}
+  echo "${fastq%.*}" >> sample-id
+  echo ${fastq}.R1.fq.gz,${fastq}.R2.fq.gz >> filepath
+  echo "forward" >> SequencingRun
+done
+paste sample-id filepath SequencingRun > 1_miSeqMap.sm.txt 
+rm sample-id filepath SequencingRun
+head  1_miSeqMap.sm.txt
+
+
+front_f="GTGCCAGCMGCCGCGGTAA"; front_r="GGACTACNVGGGTWTCTAAT" 
+export PATH=$PATH:/mnt/g/stone_meta/software/lotus2
+conda activate test
+output_fold=lotus2_output_bio
+lotus2 -i $PWD -m $PWD/1_miSeqMap.sm.txt \
+-s /mnt/g/stone_meta/database/file/beforework/lotus2/1sdm_miSeq_bio.txt \
+-o $output_fold \
+-p miSeq -amplicon_type SSU -tax_group bacteria \
+-forwardPrimer $front_f \
+-reversePrimer $front_r \
+-CL dada2 -id 0.99 -refDB SLV -taxAligner vsearch \
+-rdp_thr 0.7 -buildPhylo 0 -t 16 -sdmThreads 1 -backmap_id 0.99 -lulu 1
+
+
+##rename to hash name
+python /mnt/d/Myfile/Research/Script/amplicon_data_process/rename_fasta_hash.py OTU.fna rep-seqs_hash_redundant.fasta  --overwrite
+seqkit rmdup -s rep-seqs_hash_redundant.fasta | seqkit seq -u > rep-seqs_hash.fasta;rm rep-seqs_hash_redundant.fasta  
+
+conda activate qiime2-2022.11
+qiime tools import \
+  --input-path rep-seqs_hash.fasta \
+  --output-path rep-seqs.qza \
+  --type 'FeatureData[Sequence]'
+time qiime feature-classifier classify-sklearn \
+--i-classifier /mnt/g/stone_meta/database/file/silva-138-99-nb-classifier.qza \
+--i-reads rep-seqs.qza \
+--p-reads-per-batch 1000 \
+--p-n-jobs 2 \
+--o-classification taxonomy.qza 
+time qiime phylogeny align-to-tree-mafft-fasttree \
+  --i-sequences rep-seqs.qza \
+  --o-alignment aligned-rep-seqs.qza \
+  --o-masked-alignment masked-aligned-rep-seqs.qza \
+  --o-tree unrooted-tree.qza \
+  --o-rooted-tree rooted-tree.qza \
+  --p-n-threads 12
+
+
+
