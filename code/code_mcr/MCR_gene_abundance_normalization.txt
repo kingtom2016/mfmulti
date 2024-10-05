@@ -1,0 +1,58 @@
+mkdir resistance_source/abundance -p
+cd  resistance_source
+index=/mnt/g/stone_meta/database/resistome/ARG_CARD/ARG_SARG/bwa-mem2/Nucleotide_SARG_v3.2_Long.fasta
+conda activate test
+for var in $(ls ../../clean_fastq/* -d | xargs -n 1 basename)
+do 
+echo $var 
+bwa-mem2 mem  -t 20  ${index} ../../clean_fastq/${var}/${var}.R_1.fastq.gz   ../../clean_fastq/${var}/${var}.R_2.fastq.gz  2>/dev/null   | samtools view -F 0x4 -b -  | samtools sort -m 1G -@ 4 > abundance/${var}.sort.bam 
+coverm filter --min-read-percent-identity 0.90 --min-read-aligned-percent 0.75 -b abundance/${var}.sort.bam -o abundance/${var}.sort.filter.bam -t 8 --quiet
+samtools index -@ 8 abundance/${var}.sort.filter.bam 
+samtools idxstats  abundance/${var}.sort.filter.bam   > abundance/${var}.all.txt
+cut -f3 abundance/${var}.all.txt >  abundance/${var}.counts.txt 
+done
+cut -f1 $(ls abundance/*.all.txt | head -n 1)| sed '$d'  > gene_name.txt
+cut -f2 $(ls abundance/*.all.txt | head -n 1)| sed '$d'  > gene_length.txt   #; rm abundance/*.all.txt
+echo "$(ls abundance/*.counts.txt | sed 's/abundance\///;s/\.counts\.txt//' | tr '\n' '\t' | sed 's/\t$//')" > abundance_table_reads.tsv
+paste abundance/*.counts.txt | sed '$d' >> abundance_table_reads.tsv
+cd ../
+
+##vfdb
+conda activate test
+index=/mnt/g/stone_meta/database/resistome/VF/VFDB_setA_nt_simplified.fasta
+mkdir vfdb_source/abundance -p
+cd vfdb_source
+for var in $(ls ../../clean_fastq/* -d | xargs -n 1 basename)
+do 
+echo $var 
+bwa-mem2 mem  -t 24  ${index} ../../clean_fastq/${var}/${var}.R_1.fastq.gz   ../../clean_fastq/${var}/${var}.R_2.fastq.gz  2>/dev/null   | samtools view -F 0x4 -b -  | samtools sort -m 1G -@ 4 > abundance/${var}.sort.bam 
+coverm filter --min-read-percent-identity 0.90 --min-read-aligned-percent 0.75 -b abundance/${var}.sort.bam -o abundance/${var}.sort.filter.bam -t 8 --quiet
+samtools index -@ 8 abundance/${var}.sort.filter.bam 
+samtools idxstats  abundance/${var}.sort.filter.bam   > abundance/${var}.all.txt
+cut -f3 abundance/${var}.all.txt >  abundance/${var}.counts.txt 
+done
+cut -f1 $(ls abundance/*.all.txt | head -n 1)| sed '$d'  > gene_name.txt
+cut -f2 $(ls abundance/*.all.txt | head -n 1)| sed '$d'  > gene_length.txt  
+echo "$(ls abundance/*.counts.txt | sed 's/abundance\///;s/\.counts\.txt//' | tr '\n' '\t' | sed 's/\t$//')" > abundance_table_reads.tsv
+paste abundance/*.counts.txt | sed '$d' >> abundance_table_reads.tsv
+cd ../
+
+
+
+mkdir silva/abundance --parents
+cd silva
+ index=/mnt/y/database/silva_index/SILVA_132_SSURef_NR90_bac.fasta; identity=0.75
+conda activate test
+for var in $(ls ../../clean_fastq/* -d | xargs -n 1 basename)
+do 
+echo $var 
+bwa-mem2 mem  -t 16  ${index} ../../clean_fastq/${var}/${var}.R_1.fastq.gz   ../../clean_fastq/${var}/${var}.R_2.fastq.gz  2>/dev/null  | samtools view -F 0x4 -b -  | samtools sort -m 1G -@ 4 > abundance/${var}.sort.bam 
+coverm filter --min-read-percent-identity $identity --min-read-aligned-percent 0.75 -b abundance/${var}.sort.bam -o abundance/${var}.sort.filter.bam -t 8 --quiet
+samtools index -@ 16 abundance/${var}.sort.filter.bam
+samtools idxstats abundance/${var}.sort.filter.bam  > abundance/${var}.all.txt
+cut -f3 abundance/${var}.all.txt >  abundance/${var}.counts.txt
+done
+cut -f1 $(ls abundance/*.all.txt | head -n 1)| sed '$d'  > gene_name.txt
+cut -f2 $(ls abundance/*.all.txt | head -n 1)| sed '$d'  > gene_length.txt   #; rm abundance/*.all.txt
+echo "$(ls abundance/*.counts.txt | sed 's/abundance\///;s/\.counts\.txt//' | tr '\n' '\t' | sed 's/\t$//')" > abundance_table_reads.tsv
+paste abundance/*.counts.txt | sed '$d' >> abundance_table_reads.tsv

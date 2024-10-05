@@ -1,0 +1,8 @@
+##Identify pathogen in ASV fasta generated from Lotus2 pipeline
+
+#makeblastdb -in pathogen.fasta  -dbtype nucl
+blastn -task megablast -db /mnt/g/stone_meta/software/MBPD/db/pathogen.fasta  -evalue 1e-10 -num_threads 14 -max_target_seqs 1 -outfmt 6 -max_hsps 1  -query rep-seqs_hash.fasta > mbpd.blast
+
+#makeblastdb -in pathogen.fasta  -dbtype nucl
+blastn -task megablast -db /mnt/h/analysis/database/fishpathogen/pathogen.fasta  -evalue 1e-10 -num_threads 14 -max_target_seqs 1 -outfmt 6 -max_hsps 1  -query rep-seqs_hash.fasta > fishpd.blast
+
