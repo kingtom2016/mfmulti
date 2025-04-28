@@ -1,0 +1,215 @@
+pacman::p_load(data.table,plyr,lme4,phyloseq,vegan, ggplot2,ggpubr,ggsci,ape,dplyr,xlsx,remedy,reshape2,stringr,corrplot,ggthemes,tidyr,tidyverse,foreach,igraph,microbiome,speedyseq,rstatix,patchwork,circlize,ggh4x)
+
+physeq<-physeq %>% transform("compositional") %>%  filter_tax_table(!(str_detect(!!rlang::sym(rank),"Incertae|uncultured|Subgroup|unidentif|nknown")))%>% mutate_tax_table(Phylum=Phylum_other)
+physeq_tmp <- speedyseq::tax_glom(physeq, rank)
+taxa_selected<-physeq_tmp %>% merge_samples2("Habitat",mean) %>% prune_taxa(taxa_sums(.)/length(sample_names(.)) > tmp_abundance_cutoff, .) %>% taxa_names
+physeq_tmp <- physeq_tmp %>% prune_taxa(taxa_selected, .) ;taxa_names(physeq_tmp) <- tax_table(physeq_tmp)[,rank]
+
+if(tmp_tax_based_tree) {
+  # phy_tree(physeq_tmp)<- phy_tree(MicrobiotaProcess::as.treedata(tax_table(physeq), include.rownames=TRUE) %>% as.phylo())
+  tax<-tax_table(physeq_tmp) %>% as.data.frame() %>% select(-Phylum_other);tax[tax=="unclassified"]<-NA
+  phy_tree(physeq_tmp)<- taxa2dist(tax, varstep=F) %>% hclust() %>% as.phylo %>% phy_tree
+}
+
+  ############ Niche_Breadth
+  otu_info<-otu_table(physeq_tmp) %>% t() %>% spaa::niche.width(method = "levins") %>% t() %>% as.data.frame();colnames(otu_info)[1]<-"Niche_Breadth"
+  otu_info<-data.frame(OTU=rownames(otu_info),Niche_Breadth=otu_info,tax_table(physeq_tmp)[,c("Phylum")],row.names = rownames(otu_info))
+  ############ Marker Habitat
+  tmp<-merge_samples(physeq_tmp,"Habitat") %>% otu_table() %>% t() %>% data.frame()
+  tmp<-tmp/apply(tmp,1,max);tmp[tmp!=1]<-0; for(i in colnames(tmp)){tmp[,i][tmp[,i]==1]<-i};tmp[tmp=="0"]<-""
+  tmp<-data.frame(Most_Abun=reduce(tmp,paste0),OTU = rownames(tmp))
+  otu_info<-otu_info %>% left_join(tmp,by="OTU")
+  ############ Marker Region in Marker Habitat !!!!!!
+  tmp<-list();rownames(otu_info)<-otu_info$OTU
+  for(i in group_name){ ##DAtest 一定要多个微生物
+    tmp[[i]]<-physeq_tmp %>% subset_samples(Habitat==i) %>% 
+      prune_taxa(rownames(filter(otu_info, Most_Abun==i)),.) %>% 
+      DAtest::DA.ttt(predictor = "Region",relative = F);colnames(tmp[[i]])[c(1,5)]<-c("OTU","ordering_in_most")}
+  tmp<-do.call(rbind,tmp) ;tmp$pval.adj<-p.adjust(tmp$pval,method = "BH")
+  tmp$ordering_in_most[tmp$pval.adj>0.05]<-"No Sign."
+  tmp<-tmp %>% select(OTU,ordering_in_most)
+  otu_info<-otu_info %>% left_join(tmp,by="OTU")
+  ############ Habitat_count
+  tax<-vector()
+  for( i in group_name){
+    tax <- physeq_tmp %>% subset_samples(Habitat==i) %>%
+    prune_taxa(taxa_sums(.)/length(sample_names(.))>0.001,.) %>% otu_table() %>% t() %>% colnames() %>% c(tax) 
+  };physeq_tmp<-prune_taxa(unique(tax), physeq_tmp)
+  tmp_habitat_occur<-tax
+  tmp<-table(tmp_habitat_occur) %>% as.data.frame();colnames(tmp)<-c("OTU","Habitat_count");tmp<-tmp %>% mutate(Cross_Habitat=ifelse(Habitat_count>1,"Poly-associated","Mono-associated"),Habitat_count=Habitat_count %>% as.numeric())
+  otu_info<-otu_info %>% left_join(tmp,by="OTU")
+  ###Mean Abundance
+  tmp<-psmelt(physeq_tmp) %>% group_by(OTU) %>% summarise(Abundance=mean(Abundance)) %>% data.frame() %>% select(OTU,Abundance) %>% mutate(Abundance2=log10(Abundance*100000+1))
+  otu_info<-otu_info %>% left_join(tmp,by="OTU")
+  ############ ASV_number Micro_diversity
+  tmp<-tax_table(physeq) %>% as.data.frame() %>% group_by(!!as.name(rank)) %>% summarise(number=n()) %>% as.data.frame() %>% filter(!is.na(1));colnames(tmp)<-c("OTU","ASV_number")
+  # tmp[,2]<-log2(tmp[,2])
+  otu_info<-otu_info %>% left_join(tmp,by="OTU")
+
+  tmp_bar_per<-make_bar_per_phyloseq(physeq_tmp,group_head = group_head,group_name = group_name,rank,output_dataframe = T,display_number = 10000)[,c(2,1,3)];colnames(tmp_bar_per)<-c("OTU","Habitat","value")
+  
+  
+  p.width=0.4
+offset=0.11
+width=3.5
+library(ggtreeExtra)
+library(ggtree)
+library(tidytree)
+library(ggnewscale)
+library(ggstar)
+
+p <- ggtree(phy_tree(physeq_tmp),layout="fan",  open.angle = 180,size=0.15);p
+p <- p %<+% (otu_info %>% select(OTU,Phylum,Cross_Habitat, Abundance2) %>% filter(Abundance2>0) %>% mutate(Phylum=fct_relevel(Phylum,names(col_phylum)))) + 
+  geom_point(
+    mapping=aes(color=Phylum, size=Abundance2#, starshape=Cross_Habitat
+    ),
+    position="identity") +
+  scale_color_manual(values=col_phylum,
+                    guide=guide_legend(title="Phylum",
+                                       keywidth = 0.75, keyheight = 0.75,order=1,
+                                       override.aes=list(starshape=15)),
+                    na.translate=FALSE)+
+  # scale_starshape_manual(values=c(15, 1) %>% rev(),
+  #                        guide=guide_legend(title="Cross habitat (>0.01%)",
+  #                                           keywidth = 0.75, keyheight = 0.75, order=2),
+  #                        na.translate=FALSE)+
+  scale_size_continuous(range = c(0.25, 2), 
+                        breaks = c(1:4),labels = c("0.01%","0.1%","1%","10%"),limits = c(NA,4), 
+                        guide = guide_legend(title="Mean relative abundance",
+                                             keywidth = 0.75, keyheight = 0.75,order=3,
+                                             override.aes=list(starshape=15)))
+
+p<-p + ggnewscale::new_scale_fill() +
+  geom_fruit(data=tmp_bar_per,
+             geom=geom_bar,
+             mapping=aes(y=OTU,x=value,fill=Habitat), orientation="y",stat="identity",
+             offset = 0.05,pwidth = 1*p.width,
+             show.legend=F) +
+  scale_fill_manual(values= col_habitat)
+
+p<-p + ggnewscale::new_scale_fill() +
+  geom_fruit(data=otu_info %>% select(OTU,Most_Abun) %>% mutate(Most_Abun=fct_relevel(Most_Abun,names(col_habitat))),
+             geom=geom_tile,
+             mapping=aes(y=OTU,fill=Most_Abun),
+             axis.params=list(title  ="Enriched habitat" ),
+             p.width=p.width,width=width,offset = offset) + 
+  guides(fill=guide_legend(title="Enriched habitat",
+                           keywidth = 0.75, keyheight = 0.75,order=5,reverse = T))+
+  scale_fill_manual(values= col_habitat)
+
+p<-p + ggnewscale::new_scale_fill() +
+  geom_fruit(data=otu_info %>% select(OTU,Habitat_count),
+             geom=geom_tile,
+             mapping=aes(y=OTU,fill=Habitat_count),
+             axis.params=list(title  ="Number of occurrence habitat" ),
+             p.width=p.width,width=width,offset = offset) + 
+  guides(fill=guide_legend(title="Number of occurrence habitat",
+                           keywidth = 0.75, keyheight = 0.75,order=6)) +
+  scale_fill_continuous(low = "gray90", high = "#292929")
+
+## ASV_number  Micro_diversity
+p<-p + ggnewscale::new_scale_fill() +
+  geom_fruit(data=otu_info ,
+             geom=geom_tile,
+             mapping=aes(y=OTU,fill=log10(ASV_number)),
+             p.width=p.width,width=width,offset = offset)+
+  scale_fill_gradient(low = "gray95",high = "#b4a379",labels=c("1","10","100","1000"))+
+  guides(fill=guide_legend(title="Intra-taxa ASVs number",
+                           keywidth = 0.75, keyheight = 0.75,order=7)) 
+
+## boxplot
+# melt_simple<-psmelt(physeq_tmp) %>% select(OTU,val=Abundance,Phylum) %>% mutate(val=log10(val*100000+1))
+# p<-p + ggnewscale::new_scale_fill() +
+#   geom_fruit(
+#     data=melt_simple,
+#     geom=geom_boxplot, size=0.2,
+#     mapping = aes(y=OTU,x=val,group=label,fill=Phylum),
+#     axis.params=list(axis = "x",text.size  = 1.8, vjust = 0.5,hjust = 1,line.alpha = 0.75 ),
+#     grid.params=list(alpha =0.1,linetype =2),
+#     pwidth = 0.15,
+#     offset =0.05,
+#     outlier.size=-1,
+#     show.legend = FALSE
+#   )+scale_fill_manual(values=col_phylum)
+
+## Niche_Breadth
+df<-foreach(i=group_name_all,.combine = cbind) %do% {
+  otu<-physeq_tmp %>% subset_samples(Habitat==i) %>% otu_table()
+  tmp<-t(spaa::niche.width(as.data.frame(t(otu)), "levins")) };df[is.infinite(df)]<-0
+df<- apply(df,2,function(x){x/max(x)}) %>% as.data.frame();colnames(df)<-group_name_all
+p<-p + ggnewscale::new_scale_fill() +
+  geom_fruit(data=df %>% rownames_to_column("OTU") %>% melt(variable.name = "Habitat"),
+             geom=geom_boxplot, outlier.size=0.25, size=0.2,
+             mapping=aes(y=OTU,x=value),  orientation = "y",
+             axis.params=list(axis = "x",text.size  = 1.8, vjust = 0.5,hjust = 1,text.angle =-90,line.alpha = 0.75,
+                              title  ="Normalized \nniche breadth" ),
+             grid.params=list(alpha =0.1,linetype =2,vline =T,hline=T),
+             p.width = p.width,offset = offset #,show.legend = FALSE
+  ) +
+  scale_fill_manual(values = c("#bfcbe5"))+
+  guides(fill=guide_legend(title="",keywidth = 0.75, keyheight = 0.75,order=8))
+
+##Overall niche breadth
+# p<-p + ggnewscale::new_scale_fill() +
+#   geom_fruit(data=df %>% melt() %>% filter(variable=="Niche_Breadth"),
+#              geom=geom_bar,
+#              mapping=aes(y=OTU,x=value,fill=variable),  orientation = "y",stat='identity',
+#              axis.params=list(axis = "x",text.size  = 0.9, vjust = 0.5,hjust = 1,line.alpha = 0.75,
+#                               title  ="Niche Breadth" ),
+#              grid.params=list(alpha =0.1,linetype =2),
+#              pwidth = 0.075#,show.legend = FALSE
+#              ) +
+#   scale_fill_manual(values = c("#bfcbe5"))+
+#   guides(fill=guide_legend(title="",keywidth = 0.75, keyheight = 0.75,order=8))
+
+##tip label
+p_tmp<-p+ geom_tiplab(color='gray30',size =3,offset = 58,family="serif") & theme(plot.margin = margin(1, 1, 1, 1, "cm"),legend.background = element_blank(),legend.box.background = element_blank())
+
+
+
+
+
+
+
+
+
+
+
+##
+make_bar_per_phyloseq<-function (ps, group_head = "Habitat", group_name, level = "Genus", 
+    display_number = 10000, arrange_by_which_sample = NULL, fill_color = pal_npg()(9), 
+    output_dataframe = F, if_remove_prefix_g__ = F) 
+{
+    df <- ps %>% psmelt()
+    df <- df %>% group_by(!!as.name(group_head), !!as.name(level)) %>% 
+        dplyr::summarise(sum = sum(Abundance))
+    colnames(df) <- c("Group", "Taxa", "Abundance")
+    df <- df %>% dcast(Group ~ Taxa, value.var = "Abundance", 
+        fill = 0) %>% tibble::column_to_rownames(var = "Group")
+    if (if_remove_prefix_g__) 
+        colnames(df) <- str_sub(colnames(df), 4)
+    speces_abundance <- colSums(df, na.rm = T)
+    df_bar <- df[, order(speces_abundance, decreasing = T)[1:min(display_number, 
+        length(speces_abundance))]]
+    df_bar <- t(t(df_bar)/rowSums(t(df_bar)))
+    df_bar <- df_bar %>% melt()
+    colnames(df_bar)[1:2] <- c("Group", "variable")
+    df_bar[, 1] <- as.character(df_bar[, 1])
+    df_bar[, 2] <- as.character(df_bar[, 2])
+    if (is.null(arrange_by_which_sample)) 
+        arrange_by_which_sample <- group_name[1]
+    species_order <- df_bar %>% filter(Group == arrange_by_which_sample) %>% 
+        arrange(desc(value))
+    df_bar$variable <- factor(df_bar$variable, levels = species_order$variable)
+    if (!is.null(group_name)) 
+        df_bar$Group <- forcats::fct_relevel(df_bar$Group, group_name)
+    if (output_dataframe) 
+        return(df_bar)
+    p <- ggplot(df_bar, aes(x = variable, y = value * 100, fill = Group)) + 
+        geom_bar(stat = "identity", width = 1) + scale_fill_manual(values = fill_color, 
+        name = "Sample type") + theme_light() + ylab("Relative abundance (%)") + 
+        xlab("") + theme(aspect.ratio = 0.5, panel.grid = element_blank(), 
+        axis.text.x = element_text(angle = 65, hjust = 1, vjust = 1, 
+            size = 9))
+    return(p)
+}
