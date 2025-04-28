@@ -1,4 +1,7 @@
-# Modified by Zhongyi Hua, njbxhzy@hotmail.com
+# Modified by Zhongyi Hua, njbxhzy@hotmail.com    Jintao He, hejintao@zju.edu.cn
+# Speed ​​up parallel and resolve memory leaks
+# Example: python MD_hua_hjt_20240603.py -r -N 1000000 -i sample.fastq.gz --tmp ./tmp
+
 
 # -------------------FROM HERE IS THE ORIGINAL DESCRIPTION---------------------------------------------
 
@@ -14,7 +17,7 @@
 # Where users may wish to define their own MMSeqs2 E value and/or sequence identity cut-offs: python MD.py -i <predicted_protein-encoding_genes_file.faa> -r F -e xxx -I yyy
 # where xxx and yyy are the user degined inputs for these cut-offs
 
-# Written by Damien Finn, damien.finn@thuenen.de
+# Written by Damien Finn, damien.finn@thuenen.de (10.1093/femsec/fiae019)
 
 
 
